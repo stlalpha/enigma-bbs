@@ -30,6 +30,7 @@ HASH_USE_CERTUTIL=0
 HOST_NODE=""
 GO_BIN="go"
 PYTHON_FOR_NPM=""
+NATIVE_MODULES=(sqlite3 node-pty sharp ssh2)
 
 HOST_ARCH_RAW="$(uname -m)"
 case "$HOST_ARCH_RAW" in
@@ -328,6 +329,17 @@ PY
     fi
 }
 
+modules_present() {
+    local stage_dir="$1"
+    local present=()
+    for module in "${NATIVE_MODULES[@]}"; do
+        if [ -d "$stage_dir/node_modules/$module" ]; then
+            present+=("$module")
+        fi
+    done
+    echo "${present[*]}"
+}
+
 map_npm_platform() {
     local os="$1"
     case "$os" in
@@ -403,6 +415,19 @@ run_npm_ci() {
                 -e HUSKY=0 \
                 "$image" \
                 bash -lc "npm ci --omit=dev"
+            local rebuild_modules
+            rebuild_modules="$(modules_present "$stage_dir")"
+            if [ -n "$rebuild_modules" ]; then
+                docker run --rm \
+                    --platform "$docker_platform" \
+                    -v "$stage_dir:/workspace" \
+                    -w /workspace \
+                    -e npm_config_platform="$npm_platform" \
+                    -e npm_config_arch="$npm_arch" \
+                    -e HUSKY=0 \
+                    "$image" \
+                    bash -lc "for mod in $rebuild_modules; do npm rebuild \$mod --build-from-source || exit 1; done"
+            fi
             ;;
         darwin)
             [ "$HOST_OS" = "darwin" ] || abort "Build for ${platform} must run on macOS"
@@ -437,6 +462,18 @@ run_npm_ci() {
                     env "${env_vars[@]}" "$node_bin" "$npm_cli" ci --omit=dev
                 fi
             )
+            local rebuild_modules
+            rebuild_modules="$(modules_present "$stage_dir")"
+            if [ -n "$rebuild_modules" ]; then
+                (
+                    cd "$stage_dir" || exit 1
+                    if [ ${#arch_cmd[@]} -gt 0 ]; then
+                        env "${env_vars[@]}" "${arch_cmd[@]}" "$node_bin" "$npm_cli" rebuild $rebuild_modules --build-from-source
+                    else
+                        env "${env_vars[@]}" "$node_bin" "$npm_cli" rebuild $rebuild_modules --build-from-source
+                    fi
+                )
+            fi
             ;;
         windows)
             verify_host_node_version
@@ -454,6 +491,20 @@ run_npm_ci() {
                     "PATH=$runtime_dir;$runtime_dir/bin:$PATH" \
                     "$node_bin" "$npm_cli" ci --omit=dev
             )
+            local rebuild_modules
+            rebuild_modules="$(modules_present "$stage_dir")"
+            if [ -n "$rebuild_modules" ]; then
+                (
+                    cd "$stage_dir" || exit 1
+                    for mod in $rebuild_modules; do
+                        env "npm_config_platform=$npm_platform" \
+                            "npm_config_arch=$npm_arch" \
+                            HUSKY=0 \
+                            "PATH=$runtime_dir;$runtime_dir/bin:$PATH" \
+                            "$node_bin" "$npm_cli" rebuild "$mod" --build-from-source || exit 1
+                    done
+                )
+            fi
             ;;
         *)
             log_warn "npm install for $platform not implemented"
@@ -484,7 +535,7 @@ build_installer_binary() {
     cp "$payload" "$installer_dir/release-data.tar.gz"
 
     pushd "$installer_dir" >/dev/null
-    env GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
+    env GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 GOTOOLCHAIN=local \
         "$GO_BIN" build -ldflags="$LDFLAGS_BASE -X main.version=${VERSION_LABEL} -X main.buildDate=${BUILD_DATE} -X main.gitCommit=${GIT_COMMIT}" \
         -o "$DIST_ROOT/${output_name}"
     popd >/dev/null
