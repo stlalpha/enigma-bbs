@@ -87,53 +87,10 @@ setup_go() {
             return
         fi
 
-        log_warn "System Go version $current_version is older than required $MIN_GO_VERSION; using bundled toolchain"
+        abort "Go $MIN_GO_VERSION+ required; found $current_version. Please install a newer Go toolchain."
     fi
 
-    local go_cache_dir="$CACHE_DIR/go-${HOST_OS}-${HOST_ARCH}"
-    local go_bin="$go_cache_dir/go/bin/go"
-
-    if [ ! -x "$go_bin" ]; then
-        local archive=""
-        case "$HOST_OS" in
-            darwin)
-                archive="go1.22.5.darwin-${HOST_ARCH}.tar.gz"
-                ;;
-            linux)
-                archive="go1.22.5.linux-${HOST_ARCH}.tar.gz"
-                ;;
-            windows)
-                archive="go1.22.5.windows-${HOST_ARCH}.zip"
-                ;;
-            *)
-                abort "Unsupported host OS for automatic Go install: $HOST_OS"
-                ;;
-        esac
-
-        local url="https://go.dev/dl/${archive}"
-        local download_path="$CACHE_DIR/${archive}"
-
-        if [ ! -f "$download_path" ]; then
-            log_step "Downloading Go toolchain ${archive}"
-            curl -fsSL "$url" -o "$download_path" || abort "Failed to download Go toolchain"
-        else
-            log_info "Using cached Go toolchain ${archive}"
-        fi
-
-        rm -rf "$go_cache_dir"
-        mkdir -p "$go_cache_dir"
-
-        case "$archive" in
-            *.tar.gz)
-                tar -xzf "$download_path" -C "$go_cache_dir" || abort "Failed to extract Go toolchain"
-                ;;
-            *.zip)
-                unzip -q "$download_path" -d "$go_cache_dir" || abort "Failed to extract Go toolchain"
-                ;;
-        esac
-    fi
-
-    GO_BIN="$go_bin"
+    abort "Go $MIN_GO_VERSION+ required but not found in PATH."
 }
 
 find_python_with_distutils() {
