@@ -20,9 +20,19 @@ HOST_OS_RAW="$(uname -s)"
 case "$HOST_OS_RAW" in
     Linux*) HOST_OS="linux" ;;
     Darwin*) HOST_OS="darwin" ;;
+    FreeBSD*) HOST_OS="freebsd" ;;
     MINGW*|MSYS*|CYGWIN*) HOST_OS="windows" ;;
     *) HOST_OS="unknown" ;;
 esac
+
+RUN_SHELL="bash"
+if [ "$HOST_OS" = "freebsd" ]; then
+    if [ -x /usr/local/bin/bash ]; then
+        RUN_SHELL="/usr/local/bin/bash"
+    else
+        abort "FreeBSD requires /usr/local/bin/bash (pkg install bash)"
+    fi
+fi
 
 HASH_CMD=""
 HASH_USE_SHASUM=0
@@ -194,11 +204,7 @@ download_node_runtime() {
             esac
             ;;
         freebsd)
-            case "$arch" in
-                amd64) archive="node-v${NODE_VERSION}-freebsd-x64.tar.xz" ;;
-                arm64) archive="node-v${NODE_VERSION}-freebsd-arm64.tar.xz" ;;
-                *) abort "Unsupported freebsd arch: $arch" ;;
-            esac
+            archive=""
             ;;
         darwin)
             case "$arch" in
@@ -697,9 +703,22 @@ main() {
         sanitize_package_json "$stage_dir/package.json"
 
         case "$platform" in
-            linux/*|freebsd/*|darwin/*|windows/*)
+            linux/*|darwin/*|windows/*)
                 tarball="$(download_node_runtime "$platform")"
                 extract_node_runtime "$tarball" "$stage_dir/runtime"
+                run_npm_ci "$platform" "$stage_dir"
+                ;;
+            freebsd/*)
+                log_step "Staging FreeBSD system Node runtime"
+                local system_node="/usr/local/bin/node"
+                local system_modules="/usr/local/lib/node_modules"
+                [ -x "$system_node" ] || abort "FreeBSD node binary not found at $system_node"
+                mkdir -p "$stage_dir/runtime/bin"
+                cp "$system_node" "$stage_dir/runtime/bin/"
+                if [ -d "$system_modules" ]; then
+                    mkdir -p "$stage_dir/runtime/lib"
+                    cp -R "$system_modules" "$stage_dir/runtime/lib/"
+                fi
                 run_npm_ci "$platform" "$stage_dir"
                 ;;
             *)
