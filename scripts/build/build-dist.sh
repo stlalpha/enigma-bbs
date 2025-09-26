@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ENiGMA½ distribution builder – creates self-contained installers per platform
 
 set -euo pipefail

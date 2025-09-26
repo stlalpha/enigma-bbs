@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Wrapper to launch the distribution builder from the repo root
 set -euo pipefail
 
