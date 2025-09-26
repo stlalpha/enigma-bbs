@@ -697,7 +697,7 @@ main() {
         sanitize_package_json "$stage_dir/package.json"
 
         case "$platform" in
-            linux/*|darwin/*|windows/*)
+            linux/*|freebsd/*|darwin/*|windows/*)
                 tarball="$(download_node_runtime "$platform")"
                 extract_node_runtime "$tarball" "$stage_dir/runtime"
                 run_npm_ci "$platform" "$stage_dir"
