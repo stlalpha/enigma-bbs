@@ -1,0 +1,35 @@
+name: FreeBSD Installer
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  freebsd-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build on FreeBSD (amd64)
+        uses: vmactions/freebsd-vm@v0
+        with:
+          release: '14.1'
+          mem: 4096
+          disk: 8192
+          usesh: true
+          prepare: |
+            pkg install -y node npm python sqlite3 gmake bash git pkgconf
+          run: |
+            set -e
+            cd "$GITHUB_WORKSPACE"
+            export SKIP_COMPLETED=0
+            TARGET_PLATFORMS="freebsd/amd64" ./build.sh
+            tar -czf dist-freebsd-amd64.tar.gz -C dist .
+
+      - name: Upload FreeBSD installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: freebsd-amd64-installers
+          path: dist-freebsd-amd64.tar.gz
