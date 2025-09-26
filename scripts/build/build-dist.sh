@@ -32,6 +32,8 @@ GO_BIN="go"
 PYTHON_FOR_NPM=""
 MIN_GO_VERSION="1.22"
 NATIVE_MODULES=(sqlite3 node-pty sharp ssh2)
+SKIP_COMPLETED=${SKIP_COMPLETED:-1}
+FORCE_REBUILD=${FORCE_REBUILD:-0}
 
 HOST_ARCH_RAW="$(uname -m)"
 case "$HOST_ARCH_RAW" in
@@ -91,6 +93,25 @@ setup_go() {
     fi
 
     abort "Go $MIN_GO_VERSION+ required but not found in PATH."
+}
+
+setup_macos_build_env() {
+    if [ "$HOST_OS" != "darwin" ]; then
+        return
+    fi
+
+    local brew_prefix
+    brew_prefix="${HOMEBREW_PREFIX:-$(brew --prefix 2>/dev/null || echo /opt/homebrew)}"
+
+    local default_pkgcfg="$brew_prefix/lib/pkgconfig:$brew_prefix/opt/libffi/lib/pkgconfig:$brew_prefix/opt/vips/lib/pkgconfig"
+    if [ -z "${PKG_CONFIG_PATH:-}" ]; then
+        export PKG_CONFIG_PATH="$default_pkgcfg"
+    else
+        export PKG_CONFIG_PATH="$default_pkgcfg:$PKG_CONFIG_PATH"
+    fi
+
+    export CPPFLAGS="-I$brew_prefix/include ${CPPFLAGS:-}"
+    export LDFLAGS="-L$brew_prefix/lib ${LDFLAGS:-}"
 }
 
 find_python_with_distutils() {
@@ -372,6 +393,17 @@ find_npm_cli() {
     return 1
 }
 
+installer_filename() {
+    local platform="$1"
+    local os="${platform%%/*}"
+    local arch="${platform##*/}"
+    local name="enigma-installer-${os}-${arch}"
+    if [ "$os" = "windows" ]; then
+        name+=".exe"
+    fi
+    echo "$name"
+}
+
 run_npm_ci() {
     local platform="$1"
     local stage_dir="$2"
@@ -580,6 +612,7 @@ main() {
     fi
 
     setup_go
+    setup_macos_build_env
 
     BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     if git describe --exact-match --tags >/dev/null 2>&1; then
@@ -593,6 +626,14 @@ main() {
 
     for platform in "${TARGET_PLATFORMS[@]}"; do
         log_step "Preparing payload for ${platform}"
+        local output_name
+        output_name="$(installer_filename "$platform")"
+
+        if [ "$FORCE_REBUILD" -ne 1 ] && [ "$SKIP_COMPLETED" -eq 1 ] && [ -f "$DIST_ROOT/$output_name" ]; then
+            log_info "Skipping ${platform}; ${output_name} already exists"
+            continue
+        fi
+
         stage_dir="$WORK_ROOT/release-${platform//\//-}"
         rm -rf "$stage_dir"
         mkdir -p "$stage_dir"

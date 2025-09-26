@@ -17,6 +17,10 @@ This branch adds tooling to package ENiGMA½ with a bundled Node.js runtime and 
 3. Override `TARGET_PLATFORMS="linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64"` (or any subset) to build additional bundles.
 4. Linux targets run inside Docker and can be built anywhere with Docker/QEMU support. macOS bundles must be built on macOS (with the prerequisites above). Windows bundles can be produced on other hosts when `node` v`NODE_VERSION` is available locally.
 
+### Incremental Builds
+- Installers already present in `dist/` are skipped on subsequent runs (set `FORCE_REBUILD=1` to override).
+- Set `SKIP_COMPLETED=0` if you prefer always rebuilding every platform.
+
 The script downloads platform runtimes, runs `npm ci --omit=dev` (via Docker for Linux targets, locally otherwise) to produce platform-specific `node_modules`, assembles the payload, and cross-builds the Go installer (`cmd/installer`).
 
 ## Installer Behavior
