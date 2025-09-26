@@ -29,6 +29,7 @@ HASH_USE_SHASUM=0
 HASH_USE_CERTUTIL=0
 HOST_NODE=""
 GO_BIN="go"
+PYTHON_FOR_NPM=""
 
 HOST_ARCH_RAW="$(uname -m)"
 case "$HOST_ARCH_RAW" in
@@ -106,6 +107,24 @@ setup_go() {
     fi
 
     GO_BIN="$go_bin"
+}
+
+find_python_with_distutils() {
+    if [ -n "$PYTHON_FOR_NPM" ]; then
+        return
+    fi
+
+    local candidates=(python3 python3.12 python3.11 python3.10 python3.9 /usr/bin/python3)
+    for candidate in "${candidates[@]}"; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            if "$candidate" -c "import distutils" >/dev/null 2>&1; then
+                PYTHON_FOR_NPM="$(command -v "$candidate")"
+                return
+            fi
+        fi
+    done
+
+    log_warn "No Python with distutils found; native module builds may fail"
 }
 LDFLAGS_BASE="-s -w"
 
@@ -282,6 +301,33 @@ copy_project_sources() {
     fi
 }
 
+sanitize_package_json() {
+    local pkg="$1"
+    if [ ! -f "$pkg" ]; then
+        return
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$pkg" <<'PY'
+import json
+import sys
+
+pkg_path = sys.argv[1]
+with open(pkg_path, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+scripts = data.get('scripts')
+if scripts and scripts.get('prepare') == 'husky':
+    scripts.pop('prepare')
+    with open(pkg_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4)
+        f.write('\n')
+PY
+    else
+        perl -0pi -e 's/"prepare"\s*:\s*"husky",\n//g' "$pkg"
+    fi
+}
+
 map_npm_platform() {
     local os="$1"
     case "$os" in
@@ -356,7 +402,7 @@ run_npm_ci() {
                 -e npm_config_arch="$npm_arch" \
                 -e HUSKY=0 \
                 "$image" \
-                bash -lc "npm ci --omit=dev --ignore-scripts"
+                bash -lc "npm ci --omit=dev"
             ;;
         darwin)
             [ "$HOST_OS" = "darwin" ] || abort "Build for ${platform} must run on macOS"
@@ -366,11 +412,31 @@ run_npm_ci() {
             local npm_cli
             npm_cli="$(find_npm_cli "$runtime_dir")" || abort "npm CLI not found for $platform"
 
-            (cd "$stage_dir" && \
-                npm_config_platform="$npm_platform" \
-                npm_config_arch="$npm_arch" \
-                HUSKY=0 \
-                "$node_bin" "$npm_cli" ci --omit=dev --ignore-scripts)
+            find_python_with_distutils
+            local env_vars=(
+                "npm_config_platform=$npm_platform"
+                "npm_config_arch=$npm_arch"
+                "HUSKY=0"
+                "PATH=$runtime_dir/bin:$PATH"
+            )
+            if [ -n "$PYTHON_FOR_NPM" ]; then
+                env_vars+=("PYTHON=$PYTHON_FOR_NPM")
+            fi
+
+            local arch_cmd=()
+            if [ "$arch" = "amd64" ] && [ "$HOST_ARCH" = "arm64" ]; then
+                command -v arch >/dev/null 2>&1 || abort "Rosetta translation not available (arch command missing)"
+                arch_cmd=(arch -x86_64)
+            fi
+
+            (
+                cd "$stage_dir" || exit 1
+                if [ ${#arch_cmd[@]} -gt 0 ]; then
+                    env "${env_vars[@]}" "${arch_cmd[@]}" "$node_bin" "$npm_cli" ci --omit=dev
+                else
+                    env "${env_vars[@]}" "$node_bin" "$npm_cli" ci --omit=dev
+                fi
+            )
             ;;
         windows)
             verify_host_node_version
@@ -380,11 +446,14 @@ run_npm_ci() {
             local npm_cli
             npm_cli="$(find_npm_cli "$runtime_dir")" || abort "npm CLI not found for $platform"
 
-            (cd "$stage_dir" && \
-                npm_config_platform="$npm_platform" \
-                npm_config_arch="$npm_arch" \
-                HUSKY=0 \
-                "$node_bin" "$npm_cli" ci --omit=dev --ignore-scripts)
+            (
+                cd "$stage_dir" || exit 1
+                env "npm_config_platform=$npm_platform" \
+                    "npm_config_arch=$npm_arch" \
+                    HUSKY=0 \
+                    "PATH=$runtime_dir;$runtime_dir/bin:$PATH" \
+                    "$node_bin" "$npm_cli" ci --omit=dev
+            )
             ;;
         *)
             log_warn "npm install for $platform not implemented"
@@ -495,6 +564,7 @@ main() {
         mkdir -p "$stage_dir"
 
         copy_project_sources "$stage_dir"
+        sanitize_package_json "$stage_dir/package.json"
 
         case "$platform" in
             linux/*|darwin/*|windows/*)
