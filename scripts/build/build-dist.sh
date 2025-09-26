@@ -9,7 +9,7 @@ CACHE_DIR="${DIST_CACHE:-$ROOT_DIR/.cache/build}"
 WORK_ROOT="$ROOT_DIR/.tmp/build"
 
 NODE_VERSION="${NODE_VERSION:-22.2.0}"
-TARGET_PLATFORMS_DEFAULT="linux/amd64 linux/arm64 linux/armv7"
+TARGET_PLATFORMS_DEFAULT="linux/amd64 linux/arm64 linux/armv7 darwin/amd64 darwin/arm64"
 if [ -n "${TARGET_PLATFORMS:-}" ]; then
     read -r -a TARGET_PLATFORMS <<< "${TARGET_PLATFORMS}"
 else
@@ -551,6 +551,14 @@ build_installer_binary() {
     local os="${platform%%/*}"
     local arch="${platform##*/}"
     local output_name="enigma-installer-${os}-${arch}"
+    local go_os="$os"
+    local go_arch="$arch"
+    local go_env_extra=()
+
+    if [ "$os" = "linux" ] && [ "$arch" = "armv7" ]; then
+        go_arch="arm"
+        go_env_extra+=("GOARM=7")
+    fi
 
     if [ "$os" = "windows" ]; then
         output_name+=".exe"
@@ -560,7 +568,7 @@ build_installer_binary() {
     cp "$payload" "$installer_dir/release-data.tar.gz"
 
     pushd "$installer_dir" >/dev/null
-    env GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 GOTOOLCHAIN=local \
+    env GOOS="$go_os" GOARCH="$go_arch" CGO_ENABLED=0 GOTOOLCHAIN=local ${go_env_extra:+"${go_env_extra[@]}"} \
         "$GO_BIN" build -ldflags="$LDFLAGS_BASE -X main.version=${VERSION_LABEL} -X main.buildDate=${BUILD_DATE} -X main.gitCommit=${GIT_COMMIT}" \
         -o "$DIST_ROOT/${output_name}"
     popd >/dev/null
