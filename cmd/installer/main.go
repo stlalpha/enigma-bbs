@@ -5,7 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
-	"embed"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"

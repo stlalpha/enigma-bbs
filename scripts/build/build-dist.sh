@@ -27,18 +27,98 @@ esac
 HASH_CMD=""
 HASH_USE_SHASUM=0
 HASH_USE_CERTUTIL=0
+HOST_NODE=""
+GO_BIN="go"
+
+HOST_ARCH_RAW="$(uname -m)"
+case "$HOST_ARCH_RAW" in
+    x86_64|amd64) HOST_ARCH="amd64" ;;
+    arm64|aarch64) HOST_ARCH="arm64" ;;
+    *) HOST_ARCH="$HOST_ARCH_RAW" ;;
+esac
+
+verify_host_node_version() {
+    if [ -n "$HOST_NODE" ]; then
+        return
+    fi
+
+    if ! command -v node >/dev/null 2>&1; then
+        abort "Host Node.js not found in PATH; required for cross-platform installs"
+    fi
+
+    HOST_NODE="$(command -v node)"
+    local host_version
+    host_version="$($HOST_NODE -v)"
+    local expected="v${NODE_VERSION}"
+
+    if [ "$host_version" != "$expected" ]; then
+        log_warn "Host node version $host_version differs from expected $expected; ensure compatibility"
+    fi
+}
+
+setup_go() {
+    if command -v go >/dev/null 2>&1; then
+        GO_BIN="$(command -v go)"
+        return
+    fi
+
+    local go_cache_dir="$CACHE_DIR/go-${HOST_OS}-${HOST_ARCH}"
+    local go_bin="$go_cache_dir/go/bin/go"
+
+    if [ ! -x "$go_bin" ]; then
+        local archive=""
+        case "$HOST_OS" in
+            darwin)
+                archive="go1.22.5.darwin-${HOST_ARCH}.tar.gz"
+                ;;
+            linux)
+                archive="go1.22.5.linux-${HOST_ARCH}.tar.gz"
+                ;;
+            windows)
+                archive="go1.22.5.windows-${HOST_ARCH}.zip"
+                ;;
+            *)
+                abort "Unsupported host OS for automatic Go install: $HOST_OS"
+                ;;
+        esac
+
+        local url="https://go.dev/dl/${archive}"
+        local download_path="$CACHE_DIR/${archive}"
+
+        if [ ! -f "$download_path" ]; then
+            log_step "Downloading Go toolchain ${archive}"
+            curl -fsSL "$url" -o "$download_path" || abort "Failed to download Go toolchain"
+        else
+            log_info "Using cached Go toolchain ${archive}"
+        fi
+
+        rm -rf "$go_cache_dir"
+        mkdir -p "$go_cache_dir"
+
+        case "$archive" in
+            *.tar.gz)
+                tar -xzf "$download_path" -C "$go_cache_dir" || abort "Failed to extract Go toolchain"
+                ;;
+            *.zip)
+                unzip -q "$download_path" -d "$go_cache_dir" || abort "Failed to extract Go toolchain"
+                ;;
+        esac
+    fi
+
+    GO_BIN="$go_bin"
+}
 LDFLAGS_BASE="-s -w"
 
 log_step() {
-    echo -e "\033[1;34m[STEP]\033[0m $1"
+    echo -e "\033[1;34m[STEP]\033[0m $1" >&2
 }
 
 log_info() {
-    echo -e "\033[32m[INFO]\033[0m $1"
+    echo -e "\033[32m[INFO]\033[0m $1" >&2
 }
 
 log_warn() {
-    echo -e "\033[33m[WARN]\033[0m $1"
+    echo -e "\033[33m[WARN]\033[0m $1" >&2
 }
 
 abort() {
@@ -274,8 +354,9 @@ run_npm_ci() {
                 -w /workspace \
                 -e npm_config_platform="$npm_platform" \
                 -e npm_config_arch="$npm_arch" \
+                -e HUSKY=0 \
                 "$image" \
-                bash -lc "npm ci --omit=dev"
+                bash -lc "npm ci --omit=dev --ignore-scripts"
             ;;
         darwin)
             [ "$HOST_OS" = "darwin" ] || abort "Build for ${platform} must run on macOS"
@@ -288,20 +369,22 @@ run_npm_ci() {
             (cd "$stage_dir" && \
                 npm_config_platform="$npm_platform" \
                 npm_config_arch="$npm_arch" \
-                "$node_bin" "$npm_cli" ci --omit=dev)
+                HUSKY=0 \
+                "$node_bin" "$npm_cli" ci --omit=dev --ignore-scripts)
             ;;
         windows)
-            [ "$HOST_OS" = "windows" ] || abort "Build for ${platform} must run on Windows"
+            verify_host_node_version
             log_step "Installing npm dependencies for ${platform}"
             local node_bin
-            node_bin="$(find_node_binary "$runtime_dir")" || abort "Node binary not found for $platform"
+            node_bin="$HOST_NODE"
             local npm_cli
             npm_cli="$(find_npm_cli "$runtime_dir")" || abort "npm CLI not found for $platform"
 
             (cd "$stage_dir" && \
                 npm_config_platform="$npm_platform" \
                 npm_config_arch="$npm_arch" \
-                "$node_bin" "$npm_cli" ci --omit=dev)
+                HUSKY=0 \
+                "$node_bin" "$npm_cli" ci --omit=dev --ignore-scripts)
             ;;
         *)
             log_warn "npm install for $platform not implemented"
@@ -333,7 +416,7 @@ build_installer_binary() {
 
     pushd "$installer_dir" >/dev/null
     env GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
-        go build -ldflags="$LDFLAGS_BASE -X main.version=${VERSION_LABEL} -X main.buildDate=${BUILD_DATE} -X main.gitCommit=${GIT_COMMIT}" \
+        "$GO_BIN" build -ldflags="$LDFLAGS_BASE -X main.version=${VERSION_LABEL} -X main.buildDate=${BUILD_DATE} -X main.gitCommit=${GIT_COMMIT}" \
         -o "$DIST_ROOT/${output_name}"
     popd >/dev/null
 
@@ -393,6 +476,8 @@ main() {
         abort "Need sha256sum, shasum, or certutil for checksum generation"
     fi
 
+    setup_go
+
     BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     if git describe --exact-match --tags >/dev/null 2>&1; then
         VERSION_LABEL="$(git describe --tags)"
@@ -412,7 +497,7 @@ main() {
         copy_project_sources "$stage_dir"
 
         case "$platform" in
-            linux/*)
+            linux/*|darwin/*|windows/*)
                 tarball="$(download_node_runtime "$platform")"
                 extract_node_runtime "$tarball" "$stage_dir/runtime"
                 run_npm_ci "$platform" "$stage_dir"
