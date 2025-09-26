@@ -5,7 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
-	_ "embed"
+	"embed"
 	"errors"
 	"fmt"
 	"io"
@@ -185,9 +185,13 @@ func (i *installer) extractPayload() error {
 
 func (i *installer) createLaunchers() error {
 	fmt.Printf("%s[STEP]%s Writing helper scripts...\n", colorBlue+colorBold, colorReset)
-	runtimeBin := filepath.Join(i.installDir, "runtime", "bin")
+	runtimeDir := filepath.Join(i.installDir, "runtime")
 
 	if err := os.MkdirAll(filepath.Join(i.installDir, "bin"), 0o755); err != nil {
+		return err
+	}
+
+	if _, err := findRuntimeNode(runtimeDir); err != nil {
 		return err
 	}
 
@@ -196,7 +200,7 @@ func (i *installer) createLaunchers() error {
 		script := "@echo off\r\n" +
 			"setlocal\r\n" +
 			"set ENIGMA_HOME=%~dp0..\r\n" +
-			"set PATH=%ENIGMA_HOME%\\runtime\\bin;%PATH%\r\n" +
+			"set PATH=%ENIGMA_HOME%\\runtime;%ENIGMA_HOME%\\runtime\\bin;%PATH%\r\n" +
 			"cd /d %ENIGMA_HOME%\r\n" +
 			"node main.js %*\r\n"
 		return os.WriteFile(filepath.Join(i.installDir, "bin", "start-enigma.bat"), []byte(script), 0o755)
@@ -210,18 +214,14 @@ func (i *installer) createLaunchers() error {
 		}
 	}
 
-	if _, err := os.Stat(runtimeBin); err != nil {
-		return fmt.Errorf("runtime not found at %s", runtimeBin)
-	}
-
 	fmt.Printf("%s✓%s Launch scripts created\n\n", colorGreen, colorReset)
 	return nil
 }
 
 func (i *installer) generateConfig() error {
 	fmt.Printf("%s[STEP]%s Preparing initial configuration...\n", colorBlue+colorBold, colorReset)
-	nodePath := filepath.Join(i.installDir, "runtime", "bin", platformNodeBinary(i.platform))
-	if _, err := os.Stat(nodePath); err != nil {
+	nodePath, err := findRuntimeNode(filepath.Join(i.installDir, "runtime"))
+	if err != nil {
 		return fmt.Errorf("node runtime missing: %w", err)
 	}
 
@@ -299,16 +299,26 @@ func expandPath(path string) string {
 	return path
 }
 
-func platformNodeBinary(platform string) string {
-	if platform == "windows" {
-		return "node.exe"
-	}
-	return "node"
-}
-
 func launcherHint(platform string) string {
 	if platform == "windows" {
 		return "bin\\start-enigma.bat"
 	}
 	return "bin/start-enigma.sh"
+}
+
+func findRuntimeNode(runtimeDir string) (string, error) {
+	candidates := []string{
+		filepath.Join(runtimeDir, "bin", "node"),
+		filepath.Join(runtimeDir, "node"),
+		filepath.Join(runtimeDir, "node.exe"),
+		filepath.Join(runtimeDir, "bin", "node.exe"),
+	}
+
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+
+	return "", errors.New("node executable not found in runtime")
 }

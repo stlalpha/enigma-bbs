@@ -15,6 +15,18 @@ if [ -n "${TARGET_PLATFORMS:-}" ]; then
 else
     read -r -a TARGET_PLATFORMS <<< "$TARGET_PLATFORMS_DEFAULT"
 fi
+
+HOST_OS_RAW="$(uname -s)"
+case "$HOST_OS_RAW" in
+    Linux*) HOST_OS="linux" ;;
+    Darwin*) HOST_OS="darwin" ;;
+    MINGW*|MSYS*|CYGWIN*) HOST_OS="windows" ;;
+    *) HOST_OS="unknown" ;;
+esac
+
+HASH_CMD=""
+HASH_USE_SHASUM=0
+HASH_USE_CERTUTIL=0
 LDFLAGS_BASE="-s -w"
 
 log_step() {
@@ -36,6 +48,22 @@ abort() {
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || abort "Missing required command: $1"
+}
+
+has_rsync() {
+    command -v rsync >/dev/null 2>&1
+}
+
+copy_dir_contents() {
+    local source="$1"
+    local dest="$2"
+
+    mkdir -p "$dest"
+    if has_rsync; then
+        rsync -a "$source/" "$dest/"
+    else
+        (cd "$source" && tar cf - .) | (cd "$dest" && tar xf -)
+    fi
 }
 
 clean_previous() {
@@ -60,6 +88,20 @@ download_node_runtime() {
                 *) abort "Unsupported linux arch: $arch" ;;
             esac
             ;;
+        darwin)
+            case "$arch" in
+                amd64) archive="node-v${NODE_VERSION}-darwin-x64.tar.gz" ;;
+                arm64) archive="node-v${NODE_VERSION}-darwin-arm64.tar.gz" ;;
+                *) abort "Unsupported darwin arch: $arch" ;;
+            esac
+            ;;
+        windows)
+            case "$arch" in
+                amd64) archive="node-v${NODE_VERSION}-win-x64.zip" ;;
+                arm64) archive="node-v${NODE_VERSION}-win-arm64.zip" ;;
+                *) abort "Unsupported windows arch: $arch" ;;
+            esac
+            ;;
         *)
             abort "download_node_runtime: unsupported platform $platform"
             ;;
@@ -79,25 +121,39 @@ download_node_runtime() {
 }
 
 extract_node_runtime() {
-    local tarball="$1"
+    local archive="$1"
     local dest_dir="$2"
 
     mkdir -p "$dest_dir"
 
     local tmp_dir
     tmp_dir="$(mktemp -d)"
-    tar -xf "$tarball" -C "$tmp_dir"
-
     local extracted
-    extracted="$(find "$tmp_dir" -maxdepth 1 -mindepth 1 -type d)"
+
+    case "$archive" in
+        *.tar.xz|*.tar.gz)
+            tar -xf "$archive" -C "$tmp_dir"
+            ;;
+        *.zip)
+            unzip -q "$archive" -d "$tmp_dir" || {
+                rm -rf "$tmp_dir"
+                abort "Failed to extract $archive"
+            }
+            ;;
+        *)
+            rm -rf "$tmp_dir"
+            abort "Unsupported archive format: $archive"
+            ;;
+    esac
+
+    extracted="$(find "$tmp_dir" -maxdepth 1 -mindepth 1 -type d | head -n 1)"
     if [ -z "$extracted" ]; then
         rm -rf "$tmp_dir"
         abort "Unable to locate extracted Node directory"
     fi
 
-    # Move contents into runtime dest
     mkdir -p "$dest_dir"
-    rsync -a "$extracted"/ "$dest_dir"/
+    copy_dir_contents "$extracted" "$dest_dir"
     rm -rf "$tmp_dir"
 }
 
@@ -130,7 +186,13 @@ copy_project_sources() {
 
     for entry in "${paths[@]}"; do
         if [ -e "$ROOT_DIR/$entry" ]; then
-            rsync -a --exclude '.git' --exclude 'node_modules' "$ROOT_DIR/$entry" "$dest/"
+            if [ -d "$ROOT_DIR/$entry" ]; then
+                copy_dir_contents "$ROOT_DIR/$entry" "$dest/$entry"
+                rm -rf "$dest/$entry/node_modules"
+            else
+                mkdir -p "$dest"
+                cp "$ROOT_DIR/$entry" "$dest/$entry"
+            fi
         fi
     done
 
@@ -140,11 +202,66 @@ copy_project_sources() {
     fi
 }
 
+map_npm_platform() {
+    local os="$1"
+    case "$os" in
+        linux) echo "linux" ;;
+        darwin) echo "darwin" ;;
+        windows) echo "win32" ;;
+        *) echo "$os" ;;
+    esac
+}
+
+map_npm_arch() {
+    local arch="$1"
+    case "$arch" in
+        amd64) echo "x64" ;;
+        arm64) echo "arm64" ;;
+        *) echo "$arch" ;;
+    esac
+}
+
+find_node_binary() {
+    local runtime_dir="$1"
+    if [ -x "$runtime_dir/bin/node" ]; then
+        echo "$runtime_dir/bin/node"
+        return 0
+    fi
+    if [ -x "$runtime_dir/node" ]; then
+        echo "$runtime_dir/node"
+        return 0
+    fi
+    if [ -x "$runtime_dir/node.exe" ]; then
+        echo "$runtime_dir/node.exe"
+        return 0
+    fi
+    return 1
+}
+
+find_npm_cli() {
+    local runtime_dir="$1"
+    if [ -f "$runtime_dir/lib/node_modules/npm/bin/npm-cli.js" ]; then
+        echo "$runtime_dir/lib/node_modules/npm/bin/npm-cli.js"
+        return 0
+    fi
+    if [ -f "$runtime_dir/node_modules/npm/bin/npm-cli.js" ]; then
+        echo "$runtime_dir/node_modules/npm/bin/npm-cli.js"
+        return 0
+    fi
+    return 1
+}
+
 run_npm_ci() {
     local platform="$1"
     local stage_dir="$2"
     local os="${platform%%/*}"
     local arch="${platform##*/}"
+    local runtime_dir="$stage_dir/runtime"
+
+    local npm_platform
+    npm_platform="$(map_npm_platform "$os")"
+    local npm_arch
+    npm_arch="$(map_npm_arch "$arch")"
 
     case "$os" in
         linux)
@@ -155,13 +272,39 @@ run_npm_ci() {
                 --platform "$docker_platform" \
                 -v "$stage_dir:/workspace" \
                 -w /workspace \
-                -e npm_config_platform="$os" \
-                -e npm_config_arch="$arch" \
+                -e npm_config_platform="$npm_platform" \
+                -e npm_config_arch="$npm_arch" \
                 "$image" \
                 bash -lc "npm ci --omit=dev"
             ;;
+        darwin)
+            [ "$HOST_OS" = "darwin" ] || abort "Build for ${platform} must run on macOS"
+            log_step "Installing npm dependencies for ${platform}"
+            local node_bin
+            node_bin="$(find_node_binary "$runtime_dir")" || abort "Node binary not found for $platform"
+            local npm_cli
+            npm_cli="$(find_npm_cli "$runtime_dir")" || abort "npm CLI not found for $platform"
+
+            (cd "$stage_dir" && \
+                npm_config_platform="$npm_platform" \
+                npm_config_arch="$npm_arch" \
+                "$node_bin" "$npm_cli" ci --omit=dev)
+            ;;
+        windows)
+            [ "$HOST_OS" = "windows" ] || abort "Build for ${platform} must run on Windows"
+            log_step "Installing npm dependencies for ${platform}"
+            local node_bin
+            node_bin="$(find_node_binary "$runtime_dir")" || abort "Node binary not found for $platform"
+            local npm_cli
+            npm_cli="$(find_npm_cli "$runtime_dir")" || abort "npm CLI not found for $platform"
+
+            (cd "$stage_dir" && \
+                npm_config_platform="$npm_platform" \
+                npm_config_arch="$npm_arch" \
+                "$node_bin" "$npm_cli" ci --omit=dev)
+            ;;
         *)
-            log_warn "npm install for $platform not automated; run on target host"
+            log_warn "npm install for $platform not implemented"
             ;;
     esac
 }
@@ -203,18 +346,52 @@ create_checksums() {
     rm -f SHA256SUMS
     for file in enigma-installer-*; do
         [ -f "$file" ] || continue
-        sha256sum "$file" >> SHA256SUMS
+        if [ "$HASH_USE_CERTUTIL" -eq 1 ]; then
+            local hash_line
+            hash_line=$(certutil -hashfile "$file" SHA256 | sed -n '2p' | tr -d '\r' | tr -d ' ')
+            printf "%s  %s\n" "$hash_line" "$file" >> SHA256SUMS
+        elif [ "$HASH_USE_SHASUM" -eq 1 ]; then
+            "$HASH_CMD" -a 256 "$file" >> SHA256SUMS
+        else
+            "$HASH_CMD" "$file" >> SHA256SUMS
+        fi
     done
     popd >/dev/null
 }
 
 main() {
     require_cmd curl
-    require_cmd rsync
     require_cmd tar
     require_cmd gzip
-    require_cmd docker
-    require_cmd sha256sum
+
+    local needs_docker=0
+    local needs_unzip=0
+    for platform in "${TARGET_PLATFORMS[@]}"; do
+        case "$platform" in
+            linux/*) needs_docker=1 ;;
+            windows/*) needs_unzip=1 ;;
+        esac
+    done
+
+    if [ $needs_docker -eq 1 ]; then
+        require_cmd docker
+    fi
+
+    if [ $needs_unzip -eq 1 ]; then
+        require_cmd unzip
+    fi
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        HASH_CMD="sha256sum"
+    elif command -v shasum >/dev/null 2>&1; then
+        HASH_CMD="shasum"
+        HASH_USE_SHASUM=1
+    elif command -v certutil >/dev/null 2>&1; then
+        HASH_CMD="certutil"
+        HASH_USE_CERTUTIL=1
+    else
+        abort "Need sha256sum, shasum, or certutil for checksum generation"
+    fi
 
     BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     if git describe --exact-match --tags >/dev/null 2>&1; then

@@ -6,13 +6,15 @@ This branch adds tooling to package ENiGMA½ with a bundled Node.js runtime and 
 - Docker (with binfmt/qemu for cross-platform builds)
 - Go 1.22+
 - `curl`, `rsync`, `tar`, `gzip`, `sha256sum`
+- `unzip` (only when packaging Windows installers)
 
 ## Build Steps
 1. From the repository root run `./build.sh`. By default it produces Linux `amd64` and `arm64` installers under `dist/`.
 2. Set `NODE_VERSION` (e.g. `22.2.0`) to target a specific Node release.
-3. Override `TARGET_PLATFORMS` to adjust the build matrix. Non-Linux platforms currently require native builds; add handling before enabling them.
+3. Override `TARGET_PLATFORMS="linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64"` (or any subset) to build additional bundles.
+4. macOS and Windows targets must be built on their respective hosts so native modules compile correctly. Linux targets rely on Docker and can be built from any machine with Docker/QEMU support.
 
-The script downloads platform runtimes, runs `npm ci --omit=dev` in Docker to produce native `node_modules`, assembles the payload, and cross-builds the Go installer (`cmd/installer`).
+The script downloads platform runtimes, runs `npm ci --omit=dev` (via Docker for Linux targets, locally otherwise) to produce platform-specific `node_modules`, assembles the payload, and cross-builds the Go installer (`cmd/installer`).
 
 ## Installer Behavior
 - Prompts for a destination, extracts runtime + application files, and writes launch scripts (`bin/start-enigma.*`).
