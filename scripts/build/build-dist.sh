@@ -9,7 +9,7 @@ CACHE_DIR="${DIST_CACHE:-$ROOT_DIR/.cache/build}"
 WORK_ROOT="$ROOT_DIR/.tmp/build"
 
 NODE_VERSION="${NODE_VERSION:-22.2.0}"
-TARGET_PLATFORMS_DEFAULT="linux/amd64 linux/arm64"
+TARGET_PLATFORMS_DEFAULT="linux/amd64 linux/arm64 linux/armv7"
 if [ -n "${TARGET_PLATFORMS:-}" ]; then
     read -r -a TARGET_PLATFORMS <<< "${TARGET_PLATFORMS}"
 else
@@ -189,6 +189,7 @@ download_node_runtime() {
             case "$arch" in
                 amd64) archive="node-v${NODE_VERSION}-linux-x64.tar.xz" ;;
                 arm64) archive="node-v${NODE_VERSION}-linux-arm64.tar.xz" ;;
+                armv7) archive="node-v${NODE_VERSION}-linux-armv7l.tar.xz" ;;
                 *) abort "Unsupported linux arch: $arch" ;;
             esac
             ;;
@@ -359,6 +360,7 @@ map_npm_arch() {
     case "$arch" in
         amd64) echo "x64" ;;
         arm64) echo "arm64" ;;
+        armv7) echo "arm" ;;
         *) echo "$arch" ;;
     esac
 }
@@ -419,6 +421,9 @@ run_npm_ci() {
     case "$os" in
         linux)
             local docker_platform="${os}/${arch}"
+            if [ "$arch" = "armv7" ]; then
+                docker_platform="linux/arm/v7"
+            fi
             local image="node:${NODE_VERSION}-bullseye"
             log_step "Installing npm dependencies for ${platform}"
             docker run --rm \
@@ -427,6 +432,7 @@ run_npm_ci() {
                 -w /workspace \
                 -e npm_config_platform="$npm_platform" \
                 -e npm_config_arch="$npm_arch" \
+                $( [ "$arch" = "armv7" ] && printf '%s' "-e npm_config_arm_version=7" ) \
                 -e HUSKY=0 \
                 "$image" \
                 bash -lc "npm ci --omit=dev"
@@ -439,6 +445,7 @@ run_npm_ci() {
                     -w /workspace \
                     -e npm_config_platform="$npm_platform" \
                     -e npm_config_arch="$npm_arch" \
+                    $( [ "$arch" = "armv7" ] && printf '%s' "-e npm_config_arm_version=7" ) \
                     -e HUSKY=0 \
                     "$image" \
                     bash -lc "for mod in $rebuild_modules; do npm rebuild \$mod --build-from-source || exit 1; done"
@@ -459,6 +466,9 @@ run_npm_ci() {
                 "HUSKY=0"
                 "PATH=$runtime_dir/bin:$PATH"
             )
+            if [ "$arch" = "armv7" ]; then
+                env_vars+=("npm_config_arm_version=7")
+            fi
             if [ -n "$PYTHON_FOR_NPM" ]; then
                 env_vars+=("PYTHON=$PYTHON_FOR_NPM")
             fi

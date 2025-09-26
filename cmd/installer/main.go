@@ -63,11 +63,11 @@ func main() {
 
 func (i *installer) banner() {
 	fmt.Print(colorCyan + colorBold)
-	fmt.Println("╔══════════════════════════════════════════════════════════════════╗")
-	fmt.Printf("║                 ENiGMA½ Self-Contained Installer %-12s║\n", version)
-	fmt.Println("║                                                                  ║")
-	fmt.Printf("║           Platform detected: %-12s Arch: %-14s║\n", i.platform, i.arch)
-	fmt.Println("╚══════════════════════════════════════════════════════════════════╝")
+	fmt.Println("════════════════════════════════════════════════════════════════════")
+	fmt.Printf("ENiGMA½ Self-Contained Installer %s\n", version)
+	fmt.Println()
+	fmt.Printf("Platform detected: %s / %s\n", i.platform, i.arch)
+	fmt.Println("════════════════════════════════════════════════════════════════════")
 	fmt.Print(colorReset + "\n")
 	time.Sleep(600 * time.Millisecond)
 }
