@@ -30,6 +30,7 @@ HASH_USE_CERTUTIL=0
 HOST_NODE=""
 GO_BIN="go"
 PYTHON_FOR_NPM=""
+MIN_GO_VERSION="1.22"
 NATIVE_MODULES=(sqlite3 node-pty sharp ssh2)
 
 HOST_ARCH_RAW="$(uname -m)"
@@ -58,10 +59,35 @@ verify_host_node_version() {
     fi
 }
 
+version_ge() {
+    local ver1="$1"
+    local ver2="$2"
+    if [ "$ver1" = "$ver2" ]; then
+        return 0
+    fi
+
+    local first
+    first=$(printf '%s\n%s\n' "$ver1" "$ver2" | sort -V | head -n1)
+    if [ "$first" = "$ver2" ]; then
+        return 0
+    fi
+
+    return 1
+}
+
 setup_go() {
     if command -v go >/dev/null 2>&1; then
-        GO_BIN="$(command -v go)"
-        return
+        local system_go
+        system_go="$(command -v go)"
+        local current_version
+        current_version="$("$system_go" version | awk '{print $3}' | sed 's/go//')"
+
+        if version_ge "$current_version" "$MIN_GO_VERSION"; then
+            GO_BIN="$system_go"
+            return
+        fi
+
+        log_warn "System Go version $current_version is older than required $MIN_GO_VERSION; using bundled toolchain"
     fi
 
     local go_cache_dir="$CACHE_DIR/go-${HOST_OS}-${HOST_ARCH}"
