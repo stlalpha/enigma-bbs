@@ -281,7 +281,6 @@ copy_project_sources() {
     mkdir -p "$dest"
     local paths=(
         art
-        config
         core
         docs
         gopher
@@ -303,6 +302,9 @@ copy_project_sources() {
     )
 
     for entry in "${paths[@]}"; do
+        if [ "$entry" = "config" ]; then
+            continue
+        fi
         if [ -e "$ROOT_DIR/$entry" ]; then
             if [ -d "$ROOT_DIR/$entry" ]; then
                 copy_dir_contents "$ROOT_DIR/$entry" "$dest/$entry"
@@ -317,6 +319,12 @@ copy_project_sources() {
     mkdir -p "$dest/scripts"
     if [ -e "$ROOT_DIR/scripts/postinstall.js" ]; then
         cp "$ROOT_DIR/scripts/postinstall.js" "$dest/scripts/"
+    fi
+
+    mkdir -p "$dest/config/menus"
+    cp "$ROOT_DIR/config/README.hjson" "$dest/config/" 2>/dev/null || true
+    if [ -d "$ROOT_DIR/misc/menu_templates" ]; then
+        cp "$ROOT_DIR/misc/menu_templates"/*.in.hjson "$dest/config/menus/" 2>/dev/null || true
     fi
 }
 

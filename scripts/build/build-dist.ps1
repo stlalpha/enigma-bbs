@@ -68,7 +68,6 @@ function Copy-ProjectSources($RootDir, $StageDir) {
     New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
     $paths = @(
         'art',
-        'config',
         'core',
         'docs',
         'gopher',
@@ -90,6 +89,7 @@ function Copy-ProjectSources($RootDir, $StageDir) {
     )
 
     foreach ($entry in $paths) {
+        if ($entry -eq 'config') { continue }
         $sourcePath = Join-Path $RootDir $entry
         if (Test-Path $sourcePath) {
             $destPath = Join-Path $StageDir $entry
@@ -107,6 +107,16 @@ function Copy-ProjectSources($RootDir, $StageDir) {
     $postInstallSource = Join-Path $RootDir 'scripts/postinstall.js'
     if (Test-Path $postInstallSource) {
         Copy-Item -Path $postInstallSource -Destination (Join-Path $scriptsDir 'postinstall.js') -Force
+    }
+
+    # ensure config directory exists and seed minimal template files
+    $configStage = Join-Path $StageDir 'config'
+    New-Item -ItemType Directory -Force -Path $configStage | Out-Null
+    $configMenuDir = Join-Path $configStage 'menus'
+    New-Item -ItemType Directory -Force -Path $configMenuDir | Out-Null
+    $templateMenus = Get-ChildItem -Path (Join-Path $RootDir 'misc/menu_templates') -Filter '*.in.hjson' -ErrorAction SilentlyContinue
+    foreach ($menuTemplate in $templateMenus) {
+        Copy-Item -Path $menuTemplate.FullName -Destination (Join-Path $configMenuDir $menuTemplate.Name) -Force
     }
 
     Get-ChildItem -Path $StageDir -Filter 'node_modules' -Directory -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
