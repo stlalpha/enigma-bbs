@@ -7,6 +7,19 @@ const paths = require('path');
 const fs = require('graceful-fs');
 const _ = require('lodash');
 
+const noop = () => {};
+const fallbackLogger = {
+    child(/* opts */) {
+        return fallbackLogger;
+    },
+    trace: noop,
+    debug: noop,
+    info: noop,
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+    fatal: console.error.bind(console),
+};
+
 module.exports = class Log {
     static init() {
         const Config = require('./config.js').get();
@@ -34,6 +47,8 @@ module.exports = class Log {
             streams: logStreams,
             serializers: serializers,
         });
+
+        module.exports.log = this.log;
     }
 
     static standardSerializers() {
@@ -84,3 +99,5 @@ module.exports = class Log {
         }
     }
 };
+
+module.exports.log = fallbackLogger;

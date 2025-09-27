@@ -7,6 +7,19 @@ const _ = require('lodash');
 //  Global system configuration instance; see Config.create()
 let systemConfigInstance;
 
+function getConfig(path, defaultValue) {
+    if (!systemConfigInstance) {
+        if (typeof path === 'string') {
+            return _.get(DefaultConfig, path, defaultValue);
+        }
+        return _.cloneDeep(DefaultConfig);
+    }
+
+    return systemConfigInstance.get(path, defaultValue);
+}
+
+exports.get = getConfig;
+
 exports.Config = class Config extends ConfigLoader {
     constructor(options) {
         super(options);
@@ -53,10 +66,6 @@ exports.Config = class Config extends ConfigLoader {
             if (err) {
                 return cb(err);
             }
-
-            //  late bind an exported get method to the global Config
-            //  instance we just created
-            exports.get = systemConfigInstance.get.bind(systemConfigInstance);
 
             return cb(null);
         });
