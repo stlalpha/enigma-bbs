@@ -65,30 +65,35 @@ function FTNMessageScanTossModule() {
     this.archUtil = ArchiveUtil.getInstance();
 
     const config = Config();
-    if (_.has(config, 'scannerTossers.ftn_bso')) {
-        this.moduleConfig = config.scannerTossers.ftn_bso;
-    }
+    this.moduleConfig = _.get(config, 'scannerTossers.ftn_bso', {});
 
     this.getDefaultNetworkName = function () {
         if (this.moduleConfig.defaultNetwork) {
             return this.moduleConfig.defaultNetwork.toLowerCase();
         }
 
-        const networkNames = Object.keys(config.messageNetworks.ftn.networks);
-        if (1 === networkNames.length) {
-            return networkNames[0].toLowerCase();
+        const networks = _.get(config, 'messageNetworks.ftn.networks');
+        if (_.isPlainObject(networks)) {
+            const networkNames = Object.keys(networks);
+            if (1 === networkNames.length) {
+                return networkNames[0].toLowerCase();
+            }
         }
     };
 
     this.getDefaultZone = function (networkName) {
         const config = Config();
-        if (_.isNumber(config.messageNetworks.ftn.networks[networkName].defaultZone)) {
-            return config.messageNetworks.ftn.networks[networkName].defaultZone;
+        const networks = _.get(config, 'messageNetworks.ftn.networks');
+        if (!_.isPlainObject(networks) || !networks[networkName]) {
+            return;
+        }
+
+        if (_.isNumber(networks[networkName].defaultZone)) {
+            return networks[networkName].defaultZone;
         }
 
         //  non-explicit: default to local address zone
-        const networkLocalAddress =
-            config.messageNetworks.ftn.networks[networkName].localAddress;
+        const networkLocalAddress = networks[networkName].localAddress;
         if (networkLocalAddress) {
             const addr = Address.fromString(networkLocalAddress);
             return addr.zone;
@@ -103,14 +108,24 @@ function FTNMessageScanTossModule() {
     */
 
     this.getNetworkNameByAddress = function (remoteAddress) {
-        return _.findKey(Config().messageNetworks.ftn.networks, network => {
+        const networks = _.get(Config(), 'messageNetworks.ftn.networks');
+        if (!_.isPlainObject(networks)) {
+            return;
+        }
+
+        return _.findKey(networks, network => {
             const localAddress = Address.fromString(network.localAddress);
             return !_.isUndefined(localAddress) && localAddress.isEqual(remoteAddress);
         });
     };
 
     this.getNetworkNameByAddressPattern = function (remoteAddressPattern) {
-        return _.findKey(Config().messageNetworks.ftn.networks, network => {
+        const networks = _.get(Config(), 'messageNetworks.ftn.networks');
+        if (!_.isPlainObject(networks)) {
+            return;
+        }
+
+        return _.findKey(networks, network => {
             const localAddress = Address.fromString(network.localAddress);
             return (
                 !_.isUndefined(localAddress) &&
@@ -121,7 +136,12 @@ function FTNMessageScanTossModule() {
 
     this.getLocalAreaTagByFtnAreaTag = function (ftnAreaTag) {
         ftnAreaTag = ftnAreaTag.toUpperCase(); //  always compare upper
-        return _.findKey(Config().messageNetworks.ftn.areas, areaConf => {
+        const areas = _.get(Config(), 'messageNetworks.ftn.areas');
+        if (!_.isPlainObject(areas)) {
+            return;
+        }
+
+        return _.findKey(areas, areaConf => {
             return _.isString(areaConf.tag) && areaConf.tag.toUpperCase() === ftnAreaTag;
         });
     };
@@ -2699,7 +2719,13 @@ FTNMessageScanTossModule.prototype.processTicFilesInDirectory = function (import
 FTNMessageScanTossModule.prototype.startup = function (cb) {
     Log.info(`${exports.moduleInfo.name} Scanner/Tosser starting up`);
 
-    this.hasValidConfiguration({ shouldLog: true }); //  just check and log
+    if (!this.hasValidConfiguration({ shouldLog: true })) {
+        Log.info(
+            { module: exports.moduleInfo.name },
+            'Skipping startup due to missing configuration'
+        );
+        return cb(null);
+    }
 
     let importing = false;
 
