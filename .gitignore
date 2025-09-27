@@ -21,3 +21,12 @@ www/assets/*
 
 #   Runtime Environment
 .venv
+
+#   Local tooling caches and build output
+.cache/
+.tmp/
+dist/
+
+#   Platform metadata
+.DS_Store
+
