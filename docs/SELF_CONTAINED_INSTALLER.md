@@ -1,33 +1,99 @@
 # Self-Contained Installer Workflow
 
-This branch adds tooling to package ENiGMA½ with a bundled Node.js runtime and dependencies for distribution as single-file installers.
+Packages ENiGMA½ with a pinned Node.js runtime to create single-file installers per platform.
 
 ## Prerequisites
-- Docker (with binfmt/qemu for cross-platform builds)
-- Go 1.22+
-- `curl`, `rsync`, `tar`, `gzip`, `sha256sum`
-- `unzip` (only when packaging Windows installers)
-- A local Node.js matching `NODE_VERSION` when building Windows bundles on non-Windows hosts (used to drive npm)
-- Python 3 with `distutils` available for native module builds (Xcode’s `/usr/bin/python3` works)
-- On macOS hosts: Rosetta 2 for building `darwin/amd64` and `brew install vips pkg-config`
 
-## Build Steps
-1. From the repository root run `./build.sh`. By default it produces Linux `amd64`, `arm64`, and Raspberry Pi (`linux/armv7`) installers under `dist/`.
-2. Set `NODE_VERSION` (e.g. `22.2.0`) to target a specific Node release.
-3. Override `TARGET_PLATFORMS="linux/amd64 linux/arm64 linux/armv7 darwin/arm64 darwin/amd64 windows/amd64"` (or any subset) to build additional bundles.
-4. Linux targets run inside Docker and can be built anywhere with Docker/QEMU support. macOS bundles must be built on macOS (with the prerequisites above). Windows bundles can be produced on other hosts when `node` v`NODE_VERSION` is available locally.
+### Core Requirements
+- **Go 1.22+** (required for build-dist.sh)
+- **curl, tar, gzip** (standard archive tools)
+- **shasum** or **sha256sum** (for checksums)
+- **Python 3** with distutils (for native module rebuilds)
+- **Docker** with binfmt/QEMU (for Linux cross-compilation)
+- **unzip** (for Windows builds)
 
-### Incremental Builds
-- Installers already present in `dist/` are skipped on subsequent runs (set `FORCE_REBUILD=1` to override).
-- Set `SKIP_COMPLETED=0` if you prefer always rebuilding every platform.
+### Platform-Specific Requirements
 
-The script downloads platform runtimes, runs `npm ci --omit=dev` (via Docker for Linux targets, locally otherwise) to produce platform-specific `node_modules`, assembles the payload, and cross-builds the Go installer (`cmd/installer`).
+#### macOS
+- Homebrew **vips**
+- **pkg-config**
+- **Rosetta** (for darwin/amd64 cross-compilation)
+
+#### FreeBSD
+- `/usr/local/bin/bash`
+- `/usr/local/bin/node`
+- `/usr/local/lib/node_modules`
+
+### Optional
+- **rsync** (falls back to tar if unavailable)
+
+## Build Instructions
+
+Run from the repository root:
+```bash
+./build.sh
+```
+
+### Default Target Platforms
+- `linux/amd64`
+- `linux/arm64`
+- `linux/armv7`
+- `freebsd/amd64` (requires FreeBSD host)
+- `darwin/amd64`
+- `darwin/arm64`
+
+### Platform Limitations
+- **FreeBSD builds:** Must run on FreeBSD hosts
+- **macOS builds:** Must run on macOS hosts
+- **Linux builds:** Can be built from macOS with Docker
+
+### Configuration Options
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TARGET_PLATFORMS` | Override platform list | All supported platforms |
+| `NODE_VERSION` | Specify Node.js version | Latest stable |
+| `SKIP_COMPLETED` | Skip existing installers | `1` |
+| `FORCE_REBUILD` | Force overwrite artifacts | `0` |
+
+#### Examples
+```bash
+# Build only Linux platforms
+TARGET_PLATFORMS="linux/amd64 linux/arm64" ./build.sh
+
+# Rebuild all platforms
+SKIP_COMPLETED=0 ./build.sh
+
+# Force rebuild with specific Node version
+FORCE_REBUILD=1 NODE_VERSION=20.11.0 ./build.sh
+```
+
+### Output Locations
+- **Build workspace:** `.tmp/`
+- **Downloads cache:** `.cache/`
+- **Installers:** `dist/enigma-installer-<os>-<arch>`
 
 ## Installer Behavior
-- Prompts for a destination, extracts runtime + application files, and writes launch scripts (`bin/start-enigma.*`).
-- Invokes `scripts/postinstall.js` to generate a fresh `config/config.hjson` and default menu files on first run.
-- Leaves additional setup (SSH keys, TLS certs, etc.) to the operator.
 
-## Extending the Build
-- To support macOS/Windows, add runtime download handlers and native `npm ci` execution paths (e.g. macOS runners, Windows containers or cross-compilers).
-- Consider re-introducing signing once release keys are ready. `build-dist.sh` already centralises payload generation so signature steps can be inserted near the archive creation phase.
+The generated installer performs the following steps:
+
+1. **Platform Detection**  
+   Detects the target platform and extracts the embedded payload
+
+2. **Runtime Setup**  
+   Creates `runtime/` directory containing:
+   - Node.js binary
+   - Platform-specific node_modules
+   - Helper scripts (uses `/usr/local/bin/bash` on FreeBSD, `/bin/bash` elsewhere)
+
+3. **Post-Installation**  
+   Executes `scripts/postinstall.js --install-dir <path>` to:
+   - Generate `config/config.hjson`
+   - Create starter assets
+
+4. **Completion**  
+   Displays launch command and configuration instructions
+
+## Notes
+
+- FreeBSD builds use the system Node.js from `/usr/local` instead of downloading archives
