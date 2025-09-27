@@ -2,7 +2,7 @@ const Activity = require('../activitypub/activity');
 const Message = require('../message');
 const { MessageScanTossModule } = require('../msg_scan_toss_module');
 const { getServer } = require('../listening_server');
-const Log = require('../logger').log;
+const Logger = require('../logger');
 const { WellKnownAreaTags, AddressFlavor } = require('../message_const');
 const { Errors } = require('../enig_error');
 const Collection = require('../activitypub/collection');
@@ -26,7 +26,12 @@ exports.getModule = class ActivityPubScannerTosser extends MessageScanTossModule
     constructor() {
         super();
 
-        this.log = Log.child({ module: 'ActivityPubScannerTosser' });
+        const rootLog = Logger.log;
+        if (rootLog && rootLog.child) {
+            this.log = rootLog.child({ module: 'ActivityPubScannerTosser' });
+        } else {
+            this.log = console; // fallback to keep process alive
+        }
     }
 
     startup(cb) {
