@@ -205,7 +205,11 @@ func (i *installer) createLaunchers() error {
 			"node main.js %*\r\n"
 		return os.WriteFile(filepath.Join(i.installDir, "bin", "start-enigma.bat"), []byte(script), 0o755)
 	default:
-		script := fmt.Sprintf("#!/bin/bash\nset -e\nENIGMA_HOME=\"$(cd \"$(dirname $0)/..\" && pwd)\"\nexport PATH=\"$ENIGMA_HOME/runtime/bin:$PATH\"\ncd \"$ENIGMA_HOME\"\nexec node main.js \"$@\"\n")
+		shellPath := "/bin/bash"
+		if i.platform == "freebsd" {
+			shellPath = "/usr/local/bin/bash"
+		}
+		script := fmt.Sprintf("#!%s\nset -e\nENIGMA_HOME=\"$(cd \"$(dirname $0)/..\" && pwd)\"\nexport PATH=\"$ENIGMA_HOME/runtime/bin:$PATH\"\ncd \"$ENIGMA_HOME\"\nexec node main.js \"$@\"\n", shellPath)
 		if err := os.WriteFile(filepath.Join(i.installDir, "bin", "start-enigma.sh"), []byte(script), 0o755); err != nil {
 			return err
 		}
