@@ -317,11 +317,23 @@ function Run-NpmCiWindows($Platform, $StageDir, $NodeVersion, $CacheDir) {
     }
 
     Write-Step "Installing npm dependencies for $Platform"
+    $clComponents = @()
+    if ($env:CL) {
+        $clComponents += $env:CL
+    }
+    $clComponents += '/Zc:gotoScope-'
+    $clComponents += '/wd2362'
+    $clFlags = ($clComponents | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' '
+
     $envVars = @{
         'npm_config_platform' = $npmPlatform
         'npm_config_arch' = $npmArch
         'HUSKY' = '0'
         'PATH' = "$runtimeDir;$runtimeDir\bin;$env:PATH"
+        'GYP_MSVS_VERSION' = '2022'
+        'npm_config_msvs_version' = '2022'
+        'msvs_version' = '2022'
+        'CL' = $clFlags
     }
 
     Invoke-WithEnvironment $envVars {
