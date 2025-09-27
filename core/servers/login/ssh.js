@@ -369,15 +369,16 @@ exports.getModule = class SSHServerModule extends LoginServerModule {
 
     createServer(cb) {
         const config = Config();
-        if (true != config.loginServers.ssh.enabled) {
+        const sshConfig = _.get(config, 'loginServers.ssh');
+        if (!sshConfig || true != sshConfig.enabled) {
             return cb(null);
         }
 
         const serverConf = {
             hostKeys: [
                 {
-                    key: fs.readFileSync(config.loginServers.ssh.privateKeyPem),
-                    passphrase: config.loginServers.ssh.privateKeyPass,
+                    key: fs.readFileSync(sshConfig.privateKeyPem),
+                    passphrase: sshConfig.privateKeyPass,
                 },
             ],
             ident: 'enigma-bbs-' + enigVersion + '-srv',
@@ -385,11 +386,11 @@ exports.getModule = class SSHServerModule extends LoginServerModule {
             //  Note that sending 'banner' breaks at least EtherTerm!
 
             debug: sshDebugLine => {
-                if (true === config.loginServers.ssh.traceConnections) {
+                if (true === sshConfig.traceConnections) {
                     Log.trace(`SSH: ${sshDebugLine}`);
                 }
             },
-            algorithms: config.loginServers.ssh.algorithms,
+            algorithms: sshConfig.algorithms,
         };
 
         //
@@ -412,20 +413,23 @@ exports.getModule = class SSHServerModule extends LoginServerModule {
 
     listen(cb) {
         const config = Config();
-        if (true != config.loginServers.ssh.enabled) {
+        const sshConfig = _.get(config, 'loginServers.ssh');
+        if (!sshConfig || true != sshConfig.enabled) {
             return cb(null);
         }
 
-        const port = parseInt(config.loginServers.ssh.port);
+        const port = parseInt(sshConfig.port);
         if (isNaN(port)) {
             Log.error(
-                { server: ModuleInfo.name, port: config.loginServers.ssh.port },
+                { server: ModuleInfo.name, port: _.get(sshConfig, 'port') },
                 'Cannot load server (invalid port)'
             );
-            return cb(Errors.Invalid(`Invalid port: ${config.loginServers.ssh.port}`));
+            return cb(Errors.Invalid(`Invalid port: ${sshConfig.port}`));
         }
 
-        this.server.listen(port, config.loginServers.ssh.address, err => {
+        const bindAddress = sshConfig.address;
+
+        this.server.listen(port, bindAddress, err => {
             if (!err) {
                 Log.info(
                     { server: ModuleInfo.name, port: port },
